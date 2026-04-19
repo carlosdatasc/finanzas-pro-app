@@ -314,4 +314,8 @@ def main(page: ft.Page):
     cargar_login()
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    import os
+    inicializar_db()
+    # Ajuste para servidores web (Render, Railway, etc.)
+    port = int(os.environ.get("PORT", 8080))
+    ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=port)
