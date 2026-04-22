@@ -1,6 +1,7 @@
 import flet as ft
 import psycopg2
 import os
+from datetime import datetime
 
 # ==========================================
 # 1. CONFIGURACIÓN DE BASE DE DATOS (NUBE)
@@ -45,7 +46,7 @@ def calcular_saldo(fuente_id, tipo):
         return (ingresos + t_in) - (gastos + t_out)
 
 # ==========================================
-# 2. INTERFAZ GRÁFICA (APP)
+# 2. INTERFAZ GRÁFICA (APP RESTAURADA)
 # ==========================================
 def main(page: ft.Page):
     page.title = "Finanzas Pro Nube"
@@ -68,7 +69,14 @@ def main(page: ft.Page):
 
         def renderizar_detalles(e):
             saldo = calcular_saldo(f_id, tipo)
-            historial = ejecutar_query("SELECT fecha, monto, tipo, categoria, subcategoria, concepto FROM transacciones WHERE id_fuente=%s ORDER BY fecha DESC LIMIT 5", (f_id,))
+            
+            # Restaurado: Historial completo (Movimientos + Transferencias)
+            movs = ejecutar_query("SELECT fecha, monto, tipo, categoria, subcategoria, concepto FROM transacciones WHERE id_fuente=%s", (f_id,))
+            trans_out = ejecutar_query("SELECT t.fecha, t.monto, 'Gasto', 'Transferencia', '', 'A: ' || f.nombre FROM transferencias t JOIN fuentes f ON t.id_destino = f.id WHERE t.id_origen=%s", (f_id,))
+            trans_in = ejecutar_query("SELECT t.fecha, t.monto, 'Ingreso', 'Transferencia', '', 'De: ' || f.nombre FROM transferencias t JOIN fuentes f ON t.id_origen = f.id WHERE t.id_destino=%s", (f_id,))
+            
+            historial = movs + trans_out + trans_in
+            historial.sort(key=lambda x: x[0], reverse=True)
             
             color_bg = "#1E3A8A" if tipo == "Crédito" else ("#065F46" if tipo == "Débito" else "#78350F")
             tarjeta = ft.Container(padding=25, border_radius=25, bgcolor=color_bg, content=ft.Column([
@@ -76,23 +84,37 @@ def main(page: ft.Page):
                 ft.Text(f"${abs(saldo):,.2f}", size=35, weight=ft.FontWeight.BOLD),
             ]))
             
-            lista_movimientos = ft.Column([ft.Text("Últimos Movimientos", weight=ft.FontWeight.BOLD)], spacing=10)
-            if not historial:
-                lista_movimientos.controls.append(ft.Text("Aún no hay movimientos.", color=ft.Colors.GREY_500))
-            else:
-                for t in historial:
+            contenido_extra = ft.Column(spacing=15)
+            
+            # Restaurado: Lista de últimos movimientos dinámica
+            if historial:
+                contenido_extra.controls.append(ft.Text("Últimos Movimientos", weight=ft.FontWeight.BOLD))
+                for t in historial[:5]:
                     c = ft.Colors.RED_400 if t[2] == "Gasto" else ft.Colors.GREEN_400
                     sub = f" > {t[4]}" if t[4] else ""
-                    fecha_str = t[0].strftime("%d/%m %H:%M")
-                    lista_movimientos.controls.append(ft.Container(padding=15, border_radius=20, bgcolor="#1E2029", content=ft.Row([
+                    fecha_str = t[0].strftime("%d/%m %H:%M") if isinstance(t[0], datetime) else str(t[0])[:16]
+                    contenido_extra.controls.append(ft.Container(padding=15, border_radius=20, bgcolor="#1E2029", content=ft.Row([
                         ft.Column([
                             ft.Text(f"{t[3]}{sub}", weight=ft.FontWeight.BOLD), 
                             ft.Text(f"{fecha_str} | {t[5]}", size=12, color=ft.Colors.GREY_400)
                         ], expand=True),
                         ft.Text(f"${t[1]:.2f}", color=c, weight=ft.FontWeight.BOLD)
                     ])))
-            
-            area_dinamica.content = ft.Column([tarjeta, ft.Divider(height=20, color=ft.Colors.TRANSPARENT), lista_movimientos])
+            else:
+                contenido_extra.controls.append(ft.Text("Aún no hay movimientos.", color=ft.Colors.GREY_500))
+
+            # Restaurado: Resumen de Apartados
+            if tipo == "Débito":
+                apartados = ejecutar_query("SELECT * FROM fuentes WHERE id_padre=%s AND activo=TRUE", (f_id,))
+                if apartados:
+                    contenido_extra.controls.append(ft.Text("Tus Apartados", weight=ft.FontWeight.BOLD))
+                    for ap in apartados:
+                        saldo_ap = calcular_saldo(ap[0], "Débito")
+                        contenido_extra.controls.append(ft.Container(padding=15, border_radius=25, bgcolor="#1E2029", ink=True, on_click=lambda e, a=ap: cargar_vista_cuenta(a), content=ft.Row([
+                            ft.Icon(ft.Icons.SAVINGS, color=ft.Colors.BLUE_300), ft.Text(ap[2], expand=True), ft.Text(f"${saldo_ap:,.2f}", weight=ft.FontWeight.BOLD)
+                        ])))
+
+            area_dinamica.content = ft.Column([tarjeta, ft.Divider(height=20, color=ft.Colors.TRANSPARENT), contenido_extra])
             page.update()
 
         def renderizar_movimientos(e):
@@ -141,10 +163,46 @@ def main(page: ft.Page):
             area_dinamica.content = formulario
             page.update()
 
+        # RESTAURADO: Menú de Transferencias
+        def renderizar_transferencias(e):
+            otras_cuentas = ejecutar_query("SELECT id, nombre, tipo FROM fuentes WHERE usuario_id=%s AND id != %s AND activo=TRUE", (id_usr, f_id))
+            
+            if not otras_cuentas:
+                area_dinamica.content = ft.Container(padding=20, content=ft.Text("No tienes otras cuentas registradas para recibir dinero.", color=ft.Colors.GREY_500, text_align=ft.TextAlign.CENTER))
+                page.update(); return
+
+            monto_input = ft.TextField(label="Monto a Traspasar ($)", keyboard_type=ft.KeyboardType.NUMBER, border_radius=25)
+            destino_drop = ft.Dropdown(label="Selecciona la cuenta destino", border_radius=25, options=[ft.dropdown.Option(key=str(c[0]), text=f"{c[1]} ({c[2]})") for c in otras_cuentas])
+
+            def btn_enviar(e):
+                if not monto_input.value or not destino_drop.value:
+                    mostrar_alerta("Completa los campos", ft.Colors.RED_700); return
+                try:
+                    monto = float(monto_input.value)
+                    if tipo in ["Débito", "Efectivo"] and monto > calcular_saldo(f_id, tipo):
+                        mostrar_alerta("Fondos insuficientes", ft.Colors.RED_700); return
+                    ejecutar_query("INSERT INTO transferencias (monto, id_origen, id_destino) VALUES (%s, %s, %s)", (monto, f_id, int(destino_drop.value)))
+                    mostrar_alerta("¡Transferencia enviada con éxito!")
+                    renderizar_detalles(None)
+                except ValueError:
+                    mostrar_alerta("El monto debe ser numérico", ft.Colors.RED_700)
+
+            formulario = ft.Container(padding=25, border_radius=25, bgcolor="#1E2029", content=ft.Column([
+                ft.Text("Traspasar Dinero", size=18, weight=ft.FontWeight.BOLD),
+                ft.Text("Mueve saldo entre tus propias cuentas sin registrarlo como un gasto real.", color=ft.Colors.GREY_400, size=12),
+                ft.Divider(color=ft.Colors.TRANSPARENT),
+                monto_input, destino_drop,
+                ft.ElevatedButton("Enviar Dinero", on_click=btn_enviar, width=500, height=50, style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_600, color=ft.Colors.WHITE, shape=ft.RoundedRectangleBorder(radius=25)))
+            ]))
+            area_dinamica.content = formulario
+            page.update()
+
+        # Restaurados los 3 botones superiores
         botones_menu = ft.Row([
-            ft.ElevatedButton("Detalles", icon=ft.Icons.INFO_OUTLINE, expand=True, height=50, style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_GREY_800, color=ft.Colors.WHITE, shape=ft.RoundedRectangleBorder(radius=25)), on_click=renderizar_detalles),
-            ft.ElevatedButton("Movimientos", icon=ft.Icons.ADD_CARD, expand=True, height=50, style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_GREY_800, color=ft.Colors.WHITE, shape=ft.RoundedRectangleBorder(radius=25)), on_click=renderizar_movimientos),
-        ], spacing=10)
+            ft.ElevatedButton("Detalles", icon=ft.Icons.INFO_OUTLINE, expand=True, height=50, style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_GREY_800, color=ft.Colors.WHITE, shape=ft.RoundedRectangleBorder(radius=25), padding=5), on_click=renderizar_detalles),
+            ft.ElevatedButton("Movimientos", icon=ft.Icons.ADD_CARD, expand=True, height=50, style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_GREY_800, color=ft.Colors.WHITE, shape=ft.RoundedRectangleBorder(radius=25), padding=5), on_click=renderizar_movimientos),
+            ft.ElevatedButton("Traspasar", icon=ft.Icons.SWAP_HORIZ, expand=True, height=50, style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_GREY_800, color=ft.Colors.WHITE, shape=ft.RoundedRectangleBorder(radius=25), padding=5), on_click=renderizar_transferencias),
+        ], spacing=5)
 
         panel = ft.Container(width=500, padding=20, content=ft.Column([
             ft.Row([ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda _: cargar_dashboard()), ft.Text(nombre, size=24, weight=ft.FontWeight.BOLD)]), 
