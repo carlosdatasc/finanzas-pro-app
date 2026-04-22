@@ -1,7 +1,6 @@
 import flet as ft
 import psycopg2
 import os
-from datetime import datetime
 
 # ==========================================
 # 1. CONFIGURACIÓN DE BASE DE DATOS (NUBE)
@@ -46,7 +45,7 @@ def calcular_saldo(fuente_id, tipo):
         return (ingresos + t_in) - (gastos + t_out)
 
 # ==========================================
-# 2. INTERFAZ GRÁFICA (APP RESTAURADA)
+# 2. INTERFAZ GRÁFICA (APP)
 # ==========================================
 def main(page: ft.Page):
     page.title = "Finanzas Pro Nube"
@@ -67,45 +66,70 @@ def main(page: ft.Page):
         f_id, _, nombre, tipo, _, limite, _ = fuente
         area_dinamica = ft.Container()
 
-        def renderizar_detalles(e):
-            saldo = calcular_saldo(f_id, tipo)
-            
-            # Restaurado: Historial completo (Movimientos + Transferencias)
+        def obtener_historial_completo():
             movs = ejecutar_query("SELECT fecha, monto, tipo, categoria, subcategoria, concepto FROM transacciones WHERE id_fuente=%s", (f_id,))
             trans_out = ejecutar_query("SELECT t.fecha, t.monto, 'Gasto', 'Transferencia', '', 'A: ' || f.nombre FROM transferencias t JOIN fuentes f ON t.id_destino = f.id WHERE t.id_origen=%s", (f_id,))
             trans_in = ejecutar_query("SELECT t.fecha, t.monto, 'Ingreso', 'Transferencia', '', 'De: ' || f.nombre FROM transferencias t JOIN fuentes f ON t.id_origen = f.id WHERE t.id_destino=%s", (f_id,))
-            
             historial = movs + trans_out + trans_in
             historial.sort(key=lambda x: x[0], reverse=True)
+            return historial
+
+        # ==========================================
+        # PESTAÑA 1: DETALLES (Diseño Original Restaurado)
+        # ==========================================
+        def renderizar_detalles(e):
+            saldo_o_deuda = calcular_saldo(f_id, tipo)
+            historial_completo = obtener_historial_completo()
             
-            color_bg = "#1E3A8A" if tipo == "Crédito" else ("#065F46" if tipo == "Débito" else "#78350F")
-            tarjeta = ft.Container(padding=25, border_radius=25, bgcolor=color_bg, content=ft.Column([
-                ft.Text(f"Saldo {'Disponible' if tipo != 'Crédito' else 'Gastado'}", size=14, color=ft.Colors.WHITE70),
-                ft.Text(f"${abs(saldo):,.2f}", size=35, weight=ft.FontWeight.BOLD),
-            ]))
-            
+            texto_ultima = "Sin movimientos recientes"
+            if historial_completo:
+                ultima = historial_completo[0]
+                signo = "+" if ultima[2] == "Ingreso" else "-"
+                sub_txt = f" > {ultima[4]}" if ultima[4] else ""
+                texto_ultima = f"{ultima[3]}{sub_txt} - {ultima[5]} ({signo}${ultima[1]:.2f})"
+
+            if tipo == "Crédito":
+                disponible = limite - saldo_o_deuda
+                tarjeta_info = ft.Container(padding=25, border_radius=25, bgcolor="#1E3A8A", content=ft.Column([
+                    ft.Text("Estado de Crédito", color=ft.Colors.BLUE_200, size=14),
+                    ft.Divider(color=ft.Colors.BLUE_400),
+                    ft.Text("Saldo Disponible", size=14, color=ft.Colors.GREEN_200),
+                    ft.Text(f"${disponible:,.2f}", size=32, weight=ft.FontWeight.BOLD),
+                    ft.Text("Saldo Gastado", size=14, color=ft.Colors.RED_200),
+                    ft.Text(f"${saldo_o_deuda:,.2f}", size=24, weight=ft.FontWeight.W_500),
+                ]))
+            else: 
+                color_bg = "#065F46" if tipo == "Débito" else "#78350F"
+                tarjeta_info = ft.Container(padding=25, border_radius=25, bgcolor=color_bg, content=ft.Column([
+                    ft.Text("Estado de Cuenta", color=ft.Colors.WHITE70, size=14),
+                    ft.Divider(color=ft.Colors.WHITE30),
+                    ft.Text("Saldo Disponible", size=14, color=ft.Colors.WHITE70),
+                    ft.Text(f"${saldo_o_deuda:,.2f}", size=35, weight=ft.FontWeight.BOLD),
+                    ft.Container(padding=10, border_radius=15, bgcolor=ft.Colors.BLACK26, content=ft.Row([
+                        ft.Icon(ft.Icons.RECEIPT_LONG, size=16, color=ft.Colors.WHITE70),
+                        ft.Text(f"Último: {texto_ultima}", size=12, color=ft.Colors.WHITE)
+                    ]))
+                ]))
+
             contenido_extra = ft.Column(spacing=15)
             
-            # Restaurado: Lista de últimos movimientos dinámica
-            if historial:
+            if historial_completo:
                 contenido_extra.controls.append(ft.Text("Últimos Movimientos", weight=ft.FontWeight.BOLD))
-                for t in historial[:5]:
+                for t in historial_completo[:5]: 
                     c = ft.Colors.RED_400 if t[2] == "Gasto" else ft.Colors.GREEN_400
-                    sub = f" > {t[4]}" if t[4] else ""
-                    fecha_str = t[0].strftime("%d/%m %H:%M") if isinstance(t[0], datetime) else str(t[0])[:16]
+                    sub_txt = f" > {t[4]}" if t[4] else ""
+                    # Adaptación de Postgres a tu formato visual
+                    fecha_str = str(t[0])[:16] 
                     contenido_extra.controls.append(ft.Container(padding=15, border_radius=20, bgcolor="#1E2029", content=ft.Row([
                         ft.Column([
-                            ft.Text(f"{t[3]}{sub}", weight=ft.FontWeight.BOLD), 
-                            ft.Text(f"{fecha_str} | {t[5]}", size=12, color=ft.Colors.GREY_400)
-                        ], expand=True),
+                            ft.Text(f"{t[3]}{sub_txt}", size=14, weight=ft.FontWeight.BOLD), 
+                            ft.Text(f"{fecha_str} | {t[5]}", size=12, color=ft.Colors.GREY_400) 
+                        ], expand=True, spacing=2), 
                         ft.Text(f"${t[1]:.2f}", color=c, weight=ft.FontWeight.BOLD)
                     ])))
-            else:
-                contenido_extra.controls.append(ft.Text("Aún no hay movimientos.", color=ft.Colors.GREY_500))
 
-            # Restaurado: Resumen de Apartados
             if tipo == "Débito":
-                apartados = ejecutar_query("SELECT * FROM fuentes WHERE id_padre=%s AND activo=TRUE", (f_id,))
+                apartados = ejecutar_query("SELECT * FROM fuentes WHERE id_padre = %s AND activo = TRUE", (f_id,))
                 if apartados:
                     contenido_extra.controls.append(ft.Text("Tus Apartados", weight=ft.FontWeight.BOLD))
                     for ap in apartados:
@@ -114,9 +138,12 @@ def main(page: ft.Page):
                             ft.Icon(ft.Icons.SAVINGS, color=ft.Colors.BLUE_300), ft.Text(ap[2], expand=True), ft.Text(f"${saldo_ap:,.2f}", weight=ft.FontWeight.BOLD)
                         ])))
 
-            area_dinamica.content = ft.Column([tarjeta, ft.Divider(height=20, color=ft.Colors.TRANSPARENT), contenido_extra])
+            area_dinamica.content = ft.Column([tarjeta_info, ft.Divider(color=ft.Colors.TRANSPARENT), contenido_extra])
             page.update()
 
+        # ==========================================
+        # PESTAÑA 2: MOVIMIENTOS
+        # ==========================================
         def renderizar_movimientos(e):
             monto_input = ft.TextField(label="Monto ($)", keyboard_type=ft.KeyboardType.NUMBER, border_radius=25, expand=True)
             tipo_mov_drop = ft.Dropdown(options=[ft.dropdown.Option("Gasto"), ft.dropdown.Option("Ingreso")], value="Gasto", width=120, border_radius=25)
@@ -163,7 +190,9 @@ def main(page: ft.Page):
             area_dinamica.content = formulario
             page.update()
 
-        # RESTAURADO: Menú de Transferencias
+        # ==========================================
+        # PESTAÑA 3: TRANSFERENCIAS
+        # ==========================================
         def renderizar_transferencias(e):
             otras_cuentas = ejecutar_query("SELECT id, nombre, tipo FROM fuentes WHERE usuario_id=%s AND id != %s AND activo=TRUE", (id_usr, f_id))
             
@@ -197,7 +226,6 @@ def main(page: ft.Page):
             area_dinamica.content = formulario
             page.update()
 
-        # Restaurados los 3 botones superiores
         botones_menu = ft.Row([
             ft.ElevatedButton("Detalles", icon=ft.Icons.INFO_OUTLINE, expand=True, height=50, style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_GREY_800, color=ft.Colors.WHITE, shape=ft.RoundedRectangleBorder(radius=25), padding=5), on_click=renderizar_detalles),
             ft.ElevatedButton("Movimientos", icon=ft.Icons.ADD_CARD, expand=True, height=50, style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_GREY_800, color=ft.Colors.WHITE, shape=ft.RoundedRectangleBorder(radius=25), padding=5), on_click=renderizar_movimientos),
