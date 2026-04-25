@@ -75,7 +75,7 @@ def main(page: ft.Page):
             return historial
 
         # ==========================================
-        # PESTAÑA 1: DETALLES (Diseño Original Restaurado)
+        # PESTAÑA 1: DETALLES
         # ==========================================
         def renderizar_detalles(e):
             saldo_o_deuda = calcular_saldo(f_id, tipo)
@@ -118,7 +118,6 @@ def main(page: ft.Page):
                 for t in historial_completo[:5]: 
                     c = ft.Colors.RED_400 if t[2] == "Gasto" else ft.Colors.GREEN_400
                     sub_txt = f" > {t[4]}" if t[4] else ""
-                    # Adaptación de Postgres a tu formato visual
                     fecha_str = str(t[0])[:16] 
                     contenido_extra.controls.append(ft.Container(padding=15, border_radius=20, bgcolor="#1E2029", content=ft.Row([
                         ft.Column([
@@ -128,15 +127,39 @@ def main(page: ft.Page):
                         ft.Text(f"${t[1]:.2f}", color=c, weight=ft.FontWeight.BOLD)
                     ])))
 
+            # --- LÓGICA DE APARTADOS RESTAURADA ---
             if tipo == "Débito":
+                def abrir_dialogo_apartado(e_click):
+                    input_nombre_ap = ft.TextField(label="Nombre del apartado (Ej. Viaje)", border_radius=15)
+                    def guardar_ap(e_interno):
+                        if input_nombre_ap.value:
+                            # Se guarda con id_padre = f_id
+                            ejecutar_query("INSERT INTO fuentes (usuario_id, nombre, tipo, id_padre, limite_credito) VALUES (%s, %s, 'Débito', %s, 0)", 
+                                           (id_usr, input_nombre_ap.value, f_id))
+                            dlg_ap.open = False
+                            mostrar_alerta("Apartado creado exitosamente")
+                            renderizar_detalles(None)
+                    dlg_ap = ft.AlertDialog(title=ft.Text("Crear Apartado"), content=input_nombre_ap, actions=[ft.TextButton("Guardar", on_click=guardar_ap)])
+                    page.overlay.append(dlg_ap)
+                    dlg_ap.open = True
+                    page.update()
+
+                header_apartados = ft.Row([
+                    ft.Text("Tus Apartados", weight=ft.FontWeight.BOLD),
+                    ft.IconButton(ft.Icons.ADD_CIRCLE, icon_color=ft.Colors.BLUE_400, on_click=abrir_dialogo_apartado, tooltip="Crear Apartado")
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+                
+                contenido_extra.controls.append(header_apartados)
+
                 apartados = ejecutar_query("SELECT * FROM fuentes WHERE id_padre = %s AND activo = TRUE", (f_id,))
                 if apartados:
-                    contenido_extra.controls.append(ft.Text("Tus Apartados", weight=ft.FontWeight.BOLD))
                     for ap in apartados:
                         saldo_ap = calcular_saldo(ap[0], "Débito")
                         contenido_extra.controls.append(ft.Container(padding=15, border_radius=25, bgcolor="#1E2029", ink=True, on_click=lambda e, a=ap: cargar_vista_cuenta(a), content=ft.Row([
                             ft.Icon(ft.Icons.SAVINGS, color=ft.Colors.BLUE_300), ft.Text(ap[2], expand=True), ft.Text(f"${saldo_ap:,.2f}", weight=ft.FontWeight.BOLD)
                         ])))
+                else:
+                    contenido_extra.controls.append(ft.Text("Aún no tienes apartados en esta cuenta.", color=ft.Colors.GREY_500, size=12))
 
             area_dinamica.content = ft.Column([tarjeta_info, ft.Divider(color=ft.Colors.TRANSPARENT), contenido_extra])
             page.update()
@@ -250,7 +273,8 @@ def main(page: ft.Page):
                 ejecutar_query("INSERT INTO fuentes (usuario_id, nombre, tipo, limite_credito) VALUES (%s, %s, %s, %s)", (id_usr, input_nombre.value, input_tipo.value, 0))
                 cargar_dashboard() 
 
-        fuentes = ejecutar_query("SELECT * FROM fuentes WHERE usuario_id=%s AND activo=TRUE", (id_usr,))
+        # CORRECCIÓN: Filtramos para que solo muestre cuentas "Padre" en el Dashboard
+        fuentes = ejecutar_query("SELECT * FROM fuentes WHERE usuario_id=%s AND id_padre IS NULL AND activo=TRUE", (id_usr,))
         lista_cuentas = ft.Column(spacing=15)
         
         if not fuentes: 
