@@ -56,9 +56,15 @@ def main(page: ft.Page):
     id_usr = None
     nom_usr = None
 
+    # CORRECCIÓN PUNTO 1: Nueva sintaxis para SnackBars en Flet Web
     def mostrar_alerta(mensaje, color=ft.Colors.GREEN_700):
-        page.snack_bar = ft.SnackBar(ft.Text(mensaje, color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD), bgcolor=color, duration=3000)
-        page.snack_bar.open = True
+        alerta = ft.SnackBar(
+            content=ft.Text(mensaje, color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD), 
+            bgcolor=color, 
+            duration=3000
+        )
+        page.overlay.append(alerta)
+        alerta.open = True
         page.update()
 
     # --- VISTA DE CUENTA ---
@@ -67,6 +73,7 @@ def main(page: ft.Page):
         f_id, _, nombre, tipo, _, limite, _ = fuente
         area_dinamica = ft.Container()
 
+        # CORRECCIÓN PUNTO 3: Nueva sintaxis para Modales Asegurados
         def confirmar_borrado_item(titulo, mensaje, on_confirm):
             def cerrar(e):
                 dlg.open = False
@@ -78,11 +85,12 @@ def main(page: ft.Page):
                 page.update()
 
             dlg = ft.AlertDialog(
-                title=ft.Text(titulo),
-                content=ft.Text(mensaje),
+                modal=True,
+                title=ft.Text(titulo, weight=ft.FontWeight.BOLD),
+                content=ft.Text(mensaje, size=16),
                 actions=[
                     ft.TextButton("Cancelar", on_click=cerrar),
-                    ft.TextButton("Eliminar", on_click=ejecutar_y_cerrar, style=ft.ButtonStyle(color=ft.Colors.RED)),
+                    ft.TextButton("Eliminar", on_click=ejecutar_y_cerrar, style=ft.ButtonStyle(color=ft.Colors.RED_500)),
                 ],
             )
             page.overlay.append(dlg)
@@ -183,7 +191,7 @@ def main(page: ft.Page):
                             ft.Icon(ft.Icons.SAVINGS, color=ft.Colors.BLUE_300), 
                             ft.Container(ft.Text(ap[1]), expand=True, on_click=lambda e, a=(ap[0], None, ap[1], "Débito", f_id, 0, True): cargar_vista_cuenta(a)), 
                             ft.Text(f"${saldo_ap:,.2f}", weight=ft.FontWeight.BOLD),
-                            ft.IconButton(ft.Icons.DELETE_SWEEP_OUTLINED, icon_color="red400", on_click=lambda e, i=ap[0], n=ap[1]: confirmar_borrado_item("¿Eliminar Apartado?", f"Se ocultará '{n}'. Los registros se conservarán.", lambda: eliminar_ap(i, n)))
+                            ft.IconButton(ft.Icons.DELETE_SWEEP_OUTLINED, icon_color="red400", on_click=lambda e, i=ap[0], n=ap[1]: confirmar_borrado_item("¿Eliminar Apartado?", f"Se ocultará el apartado '{n}'. Los registros se conservarán.", lambda: eliminar_ap(i, n)))
                         ])))
                 else:
                     contenido_extra.controls.append(ft.Text("Aún no tienes apartados en esta cuenta.", color=ft.Colors.GREY_500, size=12))
