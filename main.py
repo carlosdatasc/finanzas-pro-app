@@ -56,7 +56,6 @@ def main(page: ft.Page):
     id_usr = None
     nom_usr = None
 
-    # CORRECCIÓN PUNTO 1: Nueva sintaxis para SnackBars en Flet Web
     def mostrar_alerta(mensaje, color=ft.Colors.GREEN_700):
         alerta = ft.SnackBar(
             content=ft.Text(mensaje, color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD), 
@@ -73,7 +72,6 @@ def main(page: ft.Page):
         f_id, _, nombre, tipo, _, limite, _ = fuente
         area_dinamica = ft.Container()
 
-        # CORRECCIÓN PUNTO 3: Nueva sintaxis para Modales Asegurados
         def confirmar_borrado_item(titulo, mensaje, on_confirm):
             def cerrar(e):
                 dlg.open = False
@@ -115,17 +113,41 @@ def main(page: ft.Page):
             return historial
 
         # ==========================================
-        # PESTAÑA 1: DETALLES
+        # PESTAÑA 1: DETALLES (Diseño Restaurado)
         # ==========================================
         def renderizar_detalles(e):
             saldo_o_deuda = calcular_saldo(f_id, tipo)
             historial_completo = obtener_historial_completo()
             
-            color_bg = "#1E3A8A" if tipo == "Crédito" else ("#065F46" if tipo == "Débito" else "#78350F")
-            tarjeta_info = ft.Container(padding=25, border_radius=25, bgcolor=color_bg, content=ft.Column([
-                ft.Text(f"Saldo {'Disponible' if tipo != 'Crédito' else 'Gastado'}", size=14, color=ft.Colors.WHITE70),
-                ft.Text(f"${abs(saldo_o_deuda):,.2f}", size=35, weight=ft.FontWeight.BOLD),
-            ]))
+            texto_ultima = "Sin movimientos recientes"
+            if historial_completo:
+                ultima = historial_completo[0]
+                signo = "+" if ultima['tipo'] == "Ingreso" else "-"
+                sub_txt = f" > {ultima['sub']}" if ultima['sub'] else ""
+                texto_ultima = f"{ultima['cat']}{sub_txt} - {ultima['con']} ({signo}${ultima['monto']:.2f})"
+
+            if tipo == "Crédito":
+                disponible = limite - saldo_o_deuda
+                tarjeta_info = ft.Container(padding=25, border_radius=25, bgcolor="#1E3A8A", content=ft.Column([
+                    ft.Text("Estado de Crédito", color=ft.Colors.BLUE_200, size=14),
+                    ft.Divider(color=ft.Colors.BLUE_400),
+                    ft.Text("Saldo Disponible", size=14, color=ft.Colors.GREEN_200),
+                    ft.Text(f"${disponible:,.2f}", size=32, weight=ft.FontWeight.BOLD),
+                    ft.Text("Saldo Gastado", size=14, color=ft.Colors.RED_200),
+                    ft.Text(f"${saldo_o_deuda:,.2f}", size=24, weight=ft.FontWeight.W_500),
+                ]))
+            else: 
+                color_bg = "#065F46" if tipo == "Débito" else "#78350F"
+                tarjeta_info = ft.Container(padding=25, border_radius=25, bgcolor=color_bg, content=ft.Column([
+                    ft.Text("Estado de Cuenta", color=ft.Colors.WHITE70, size=14),
+                    ft.Divider(color=ft.Colors.WHITE30),
+                    ft.Text("Saldo Disponible", size=14, color=ft.Colors.WHITE70),
+                    ft.Text(f"${saldo_o_deuda:,.2f}", size=35, weight=ft.FontWeight.BOLD),
+                    ft.Container(padding=10, border_radius=15, bgcolor=ft.Colors.BLACK26, content=ft.Row([
+                        ft.Icon(ft.Icons.RECEIPT_LONG, size=16, color=ft.Colors.WHITE70),
+                        ft.Text(f"Último: {texto_ultima}", size=12, color=ft.Colors.WHITE)
+                    ]))
+                ]))
 
             contenido_extra = ft.Column(spacing=15)
             
